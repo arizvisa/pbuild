@@ -1,0 +1,26 @@
+resolve "program" "link" "main.o"
+resolve "main.o" "compile" "main.c" "main.h"
+
+### functions
+link()
+{
+    out=$1
+    shift
+
+    echo "gcc -o \"$out\" $@"
+    touch $out
+
+    return 0
+}
+
+compile()
+{
+    out=$1
+    shift
+
+    echo "gcc -o \"$out\" -c $1"
+    touch $out
+
+    return 0
+}
+
