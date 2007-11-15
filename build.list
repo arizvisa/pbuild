@@ -4,23 +4,13 @@ resolve "main.o" "compile" "main.c" "main.h"
 ### functions
 link()
 {
-    out=$1
-    shift
-
-    echo "gcc -o \"$out\" $@"
-    touch $out
-
-    return 0
+    echo "gcc -o \"$1\" $@"
+    touch $1
 }
 
 compile()
 {
-    out=$1
-    shift
-
-    echo "gcc -o \"$out\" -c $1"
-    touch $out
-
-    return 0
+    echo "gcc -o \"$1\" -c $2"
+    touch $1
 }
 
