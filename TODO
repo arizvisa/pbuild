@@ -1,0 +1,21 @@
+building dependencies with paths needs to be tested
+write different types of build scenarios
+all variables need to be hidden when executing ./build.list
+
+features that make supports:
+    -A - make all errors non-fatal
+    -C - change to directory
+    -d - debugging information
+    -f - use specified makefile
+    -j - parallel building
+    -q - question mode (1 on failure, 0 on success)
+
+add platform independance:
+    cc - c compiler
+    link - linker
+    asm - assembler
+    chdir - switch to a directory
+    rm - remove a file
+    chmod - modify permissions (if supported)
+    cp - copy a file
+    touch - mark a file as updated

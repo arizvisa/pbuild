@@ -1,9 +1,4 @@
 #!/bin/dash
-LIST=""
-DEBUG=0
-BUILDDIR="./.build"
-BUILDSUFFIX=".sh"
-
 debug()
 {
     if $( test $DEBUG -gt 0 ); then
@@ -19,6 +14,12 @@ info()
 error()
 {
     echo "[fail] $@" 1>&2
+    exit
+}
+
+fatal()
+{
+    echo "[fatal] $@" 1>&2
     exit
 }
 
@@ -122,8 +123,8 @@ for dep in $_dependencies_; do
         fi
     else
         # attempt resolving it w/ a generated build script
-        debug "resolving \$dep with \$dep$BUILDSUFFIX"
-        . "$BUILDDIR/\$dep$BUILDSUFFIX"
+        debug "resolving \$dep with \$dep.$BUILDSUFFIX"
+        . "$BUILDDIR/\$dep.$BUILDSUFFIX"
         count=\$( expr $count + \$? )
     fi
 done
@@ -154,22 +155,87 @@ resolve()
     LIST=$( _hashAdd "$LIST" "$rule" "$function" )
 
     out=$( _template "$rule" "$function" $@ )
-    echo "$out" > "$BUILDDIR/$rule$BUILDSUFFIX"
-    chmod +x "$BUILDDIR/$rule$BUILDSUFFIX"
+    echo "$out" > "$BUILDDIR/$rule.$BUILDSUFFIX"
+    chmod +x "$BUILDDIR/$rule.$BUILDSUFFIX"
 }
 
 _help()
 {
     echo "Usage: $0 target [args...]"
-    echo "builds target using all the shit in build.list"
+cat <<EOF
+build target using the contents of "$FILE"
+
+  -A            make all errors non-fatal
+  -x dir        use dir ($BUILDDIR) for storing internal build scripts
+  -C dir        change to directory
+  -d            display debugging information
+  -f file       use specified build file
+  -j maxprocs   parallel building
+  -q            question mode (1 on failure, 0 on success)
+
+EOF
 }
 
+#########################
 ### main code starts here
+# globals
+LIST=""
+
+BUILDSUFFIX="sh"    #XXX: this is platform dependant
+
+# options
+DEBUG=0
+NOBITCH=0
+QUESTION=0
+JOBS=0
+FILE=./build.list
+BUILDDIR="./.build"
+
+# parse opts
+while getopts AC:df:ij:qhx: opt; do
+    case $opt in
+        A)
+            NOBITCH=1
+            ;;
+
+        d)
+            DEBUG=1
+            ;;
+
+        q)
+            QUESTION=1
+            fatal "question-mode not supported"
+            ;;
+
+        x)
+            BUILDDIR=$OPTARG
+            ;;
+
+        C)
+            chdir $OPTARG       #XXX: chdir needs to be platform independant
+            ;;
+
+        f) 
+            FILE=$OPTARG
+            ;;
+
+        j)
+            JOBS=$OPTARG
+            fatal "parallel builds not supported"
+            ;;
+
+        h)
+            _help $0
+            exit 0
+            ;;
+    esac
+done
+shift $( expr $OPTIND - 1 )
+
 if $(test $# -lt 1); then
     _help $0
     exit
 fi
-
 
 RULE=$1
 shift
@@ -184,5 +250,5 @@ else
     mkdir "$BUILDDIR"
 fi
 
-. ./build.list
-. $BUILDDIR/$RULE$BUILDSUFFIX
+. $file
+. $BUILDDIR/$RULE
