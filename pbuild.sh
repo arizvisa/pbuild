@@ -1,4 +1,4 @@
-#!/bin/dash
+#!/bin/sh
 debug()
 {
     if $( test $DEBUG -gt 0 ); then
@@ -32,12 +32,16 @@ _hashGet()
     field=$1
     shift
 
+    if $( test "$field" == "" ); then
+        return 1
+    fi
+
     echo "$hash" | while read item; do      # XXX: new process
         key=$( echo "$item" | cut -d ':' -f 1 )
         value=$( echo "$item" | cut -d ':' -f 2- )
         if $( test "$key" = "$field" ); then
             echo "$value"
-            exit 1  # XXX: remember we're spawning another process
+            exit 1  # XXX: remember we're currently inside a subprocess
         fi
     done
 
@@ -107,10 +111,15 @@ _template()
     cat <<EOF
 count=0
 for dep in $_dependencies_; do
+
+    #echo ----------------------------------------------------------------------
+    #echo [1] $_rule_: looking for \$dep
+    #echo "\$LIST"
     function=\$( _hashGet "\$LIST" "\$dep" )
 
     if \$( test \$? -gt 0 ); then
-        # not sure how to resolve it, so treat it as a file
+        #echo [2] $_rule_: returned \$? -\> \$function
+        ## not sure how to resolve it, so treat it as a file
         if \$( test ! -e "\$dep" ); then
             error "file \$dep not found"
         fi
@@ -122,14 +131,15 @@ for dep in $_dependencies_; do
             debug "\$dep is ok"
         fi
     else
-        # attempt resolving it w/ a generated build script
+        #echo [2] $_rule_: returned \$? -\> \$function
+        ## attempt resolving it w/ a generated build script
         debug "resolving \$dep with \$dep.$BUILDSUFFIX"
         . "$BUILDDIR/\$dep.$BUILDSUFFIX"
-        count=\$( expr $count + \$? )
+        count=\$( expr \$count + \$? )
     fi
 done
 
-if \$( test \$count -gt 0 ); then
+if \$( test \$count -gt 0 -o ! -e "$_rule_"); then
     info "updating $_rule_"
     function=\$( _hashGet "\$LIST" "$_rule_" )
     \$function $_rule_ $_dependencies_
@@ -161,7 +171,7 @@ resolve()
 
 _help()
 {
-    echo "Usage: $0 target [args...]"
+    echo "Usage: $0 [options] target"
 cat <<EOF
 build target using the contents of "$FILE"
 
@@ -188,8 +198,8 @@ DEBUG=0
 NOBITCH=0
 QUESTION=0
 JOBS=0
-FILE=./build.list
-BUILDDIR="./.build"
+FILE=./pbuild.list
+BUILDDIR="./.pbuild"
 
 # parse opts
 while getopts AC:df:ij:qhx: opt; do
@@ -250,5 +260,5 @@ else
     mkdir "$BUILDDIR"
 fi
 
-. $file
-. $BUILDDIR/$RULE
+. $FILE $@
+. $BUILDDIR/$RULE.$BUILDSUFFIX
