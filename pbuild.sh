@@ -13,19 +13,18 @@ info()
 
 error()
 {
-    echo "[fail] $@" 1>&2
-    exit
+    echo "[error] $@" 1>&2
 }
 
 fatal()
 {
-    echo "[fatal] $@" 1>&2
-    exit
+    echo "[fail] $@" 1>&2
+    exit 1
 }
 
-# _hashGet(hash, key)
+# hashGet(hash, key)
 # returns hash[key]
-_hashGet()
+hashGet()
 {
     hash=$1
     shift
@@ -54,7 +53,7 @@ _hashGet()
     return 1
 }
 
-_hashKeys()
+hashKeys()
 {
     echo "$1" | while read item; do      # XXX: new process
         key=$( echo "$item" | cut -d ':' -f 1 )
@@ -63,9 +62,9 @@ _hashKeys()
     return 0
 }
 
-# _hashAdd(hash, key, value)
+# hashAdd(hash, key, value)
 # returns hash with key:value added
-_hashAdd()
+hashAdd()
 {
     local IFS="\n"
     argh=$1
@@ -83,9 +82,9 @@ _hashAdd()
     return 0
 }
 
-# _template(rule, function, dependencies)
+# __template(rule, function, dependencies)
 # returns a script that resolves "rule" utilizing function
-_template()
+__template()
 {
     _rule_=$1
     shift
@@ -115,13 +114,13 @@ for dep in $_dependencies_; do
     #echo ----------------------------------------------------------------------
     #echo [1] $_rule_: looking for \$dep
     #echo "\$LIST"
-    function=\$( _hashGet "\$LIST" "\$dep" )
+    function=\$( hashGet "\$LIST" "\$dep" )
 
     if \$( test \$? -gt 0 ); then
         #echo [2] $_rule_: returned \$? -\> \$function
         ## not sure how to resolve it, so treat it as a file
         if \$( test ! -e "\$dep" ); then
-            error "file \$dep not found"
+            fatal "file \$dep not found"
         fi
 
         if \$( test "\$dep" -nt "$_rule_"  ); then
@@ -141,7 +140,7 @@ done
 
 if \$( test \$count -gt 0 -o ! -e "$_rule_"); then
     info "updating $_rule_"
-    function=\$( _hashGet "\$LIST" "$_rule_" )
+    function=\$( hashGet "\$LIST" "$_rule_" )
     \$function $_rule_ $_dependencies_
 else
     info "$_rule_ is up to date"
@@ -162,14 +161,24 @@ resolve()
     function=$1
     shift
 
-    LIST=$( _hashAdd "$LIST" "$rule" "$function" )
+    LIST=$( hashAdd "$LIST" "$rule" "$function" )
 
-    out=$( _template "$rule" "$function" $@ )
-    echo "$out" > "$BUILDDIR/$rule.$BUILDSUFFIX"
+    ## if rule is in a subdirectory
+    # FIXME: i'm a dick for testing for '/'s via sed and a strcmp
+    directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
+
+    if $( test "$directory" != "$rule" -a ! -d "$BUILDDIR/$directory"); then
+        directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
+        mkdir -p "$BUILDDIR/$directory"
+        info "creating workspace: $directory"
+    fi
+
+    out=$( __template "$rule" "$function" $@ )
+    echo "$out" >| "$BUILDDIR/$rule.$BUILDSUFFIX"
     chmod +x "$BUILDDIR/$rule.$BUILDSUFFIX"
 }
 
-_help()
+__help()
 {
     echo "Usage: $0 [options] target"
 cat <<EOF
@@ -235,7 +244,7 @@ while getopts AC:df:ij:qhx: opt; do
             ;;
 
         h)
-            _help $0
+            __help $0
             exit 0
             ;;
     esac
@@ -243,22 +252,28 @@ done
 shift $( expr $OPTIND - 1 )
 
 if $(test $# -lt 1); then
-    _help $0
-    exit
+    __help $0
+    exit 0
 fi
 
-RULE=$1
+RULE="$1"
 shift
 
 if $( test -e "$BUILDDIR" ); then
     if $( test ! -d "$BUILDDIR" ); then
-        error "$BUILDDIR is not a directory"
+        fatal "$BUILDDIR is not a directory"
     fi
     debug "$BUILDDIR already exists"
 else
     info "making build directory: $BUILDDIR"
-    mkdir "$BUILDDIR"
+    mkdir -p "$BUILDDIR"
 fi
 
-. $FILE $@
-. $BUILDDIR/$RULE.$BUILDSUFFIX
+. "$FILE" $@
+
+if $( test ! -f "$BUILDDIR/$RULE.$BUILDSUFFIX" ); then
+    fatal "unknown target: $RULE"
+fi
+
+# XXX: should dump all targets here and rm them if they're files
+. "$BUILDDIR/$RULE.$BUILDSUFFIX"
