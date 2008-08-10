@@ -87,12 +87,12 @@ hashAdd()
 __template()
 {
     _rule_=$1
+    _directory_=$( echo "$_rule_" | sed 's/[^/\]\+$//' )
     shift
     _function_=$1
     shift
     _dependencies_=$@
 
-    
     ## template produces the following code
     # count = 0
     # for dep in (_dependencies_):
@@ -141,7 +141,13 @@ done
 if \$( test \$count -gt 0 -o ! -e "$_rule_"); then
     info "updating $_rule_"
     function=\$( hashGet "\$LIST" "$_rule_" )
+
     \$function $_rule_ $_dependencies_
+
+    if \$( test \$? -ne 0 ); then
+        fatal "unable to update $_rule"
+    fi
+    debug "successfully updated $_rule_"
 else
     info "$_rule_ is up to date"
 fi
@@ -165,12 +171,12 @@ resolve()
 
     ## if rule is in a subdirectory
     # FIXME: i'm a dick for testing for '/'s via sed and a strcmp
-    directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
+    __directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
 
-    if $( test "$directory" != "$rule" -a ! -d "$BUILDDIR/$directory"); then
-        directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
-        mkdir -p "$BUILDDIR/$directory"
-        info "creating workspace: $directory"
+    if $( test "$__directory" != "$rule" -a ! -d "$BUILDDIR/$__directory"); then
+        __directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
+        mkdir -p "$BUILDDIR/$__directory"
+        info "creating workspace: $__directory"
     fi
 
     out=$( __template "$rule" "$function" $@ )
@@ -209,6 +215,7 @@ QUESTION=0
 JOBS=0
 FILE=./pbuild.list
 BUILDDIR="./.pbuild"
+ROOT=$(pwd)
 
 # parse opts
 while getopts AC:df:ij:qhx: opt; do
@@ -269,6 +276,7 @@ else
     mkdir -p "$BUILDDIR"
 fi
 
+debug "processing $FILE"
 . "$FILE" $@
 
 if $( test ! -f "$BUILDDIR/$RULE.$BUILDSUFFIX" ); then
@@ -276,4 +284,7 @@ if $( test ! -f "$BUILDDIR/$RULE.$BUILDSUFFIX" ); then
 fi
 
 # XXX: should dump all targets here and rm them if they're files
+debug "building $RULE"
 . "$BUILDDIR/$RULE.$BUILDSUFFIX"
+
+info "successfully updated $RULE"
