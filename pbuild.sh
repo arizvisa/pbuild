@@ -139,8 +139,8 @@ for dep in $_dependencies_; do
 done
 
 if \$( test \$count -gt 0 -o ! -e "$_rule_"); then
-    info "updating $_rule_"
     function=\$( hashGet "\$LIST" "$_rule_" )
+    info "updating $_rule_ via $function"
 
     \$function $_rule_ $_dependencies_
 
