@@ -1,7 +1,7 @@
 #!/bin/sh
 debug()
 {
-    if $( test $DEBUG -gt 0 ); then
+    if test $DEBUG -gt 0; then
         echo "[debug] $@" 1>&2
     fi
 }
@@ -31,20 +31,20 @@ hashGet()
     field=$1
     shift
 
-    if $( test "$field" == "" ); then
+    if test "$field" == ""; then
         return 1
     fi
 
     echo "$hash" | while read item; do      # XXX: new process
         key=$( echo "$item" | cut -d ':' -f 1 )
         value=$( echo "$item" | cut -d ':' -f 2- )
-        if $( test "$key" = "$field" ); then
+        if test "$key" = "$field"; then
             echo "$value"
             exit 1  # XXX: remember we're currently inside a subprocess
         fi
     done
 
-    if $( test $? -gt 0 ); then
+    if test $? -gt 0; then
         return 0
     fi
 
@@ -108,51 +108,53 @@ __template()
     # return count
 
     cat <<EOF
-count=0
+## first do all building
 for dep in $_dependencies_; do
-
-    #echo ----------------------------------------------------------------------
-    #echo [1] $_rule_: looking for \$dep
-    #echo "\$LIST"
     function=\$( hashGet "\$LIST" "\$dep" )
+    res=\$?
 
-    if \$( test \$? -gt 0 ); then
-        #echo [2] $_rule_: returned \$? -\> \$function
+    debug "isaleaf -> $_rule_: \$dep \$res -> \$function"
+    if test \$res -eq 0; then
+        ## attempt resolving it w/ a generated build script
+        debug ">>>>>>>>>>>> \$dep"
+        . "$BUILDDIR/\$dep.$BUILDSUFFIX"
+        ## XXX: \$dep is killed at this point
+        debug "<<<<<<<<<<<< \$?"
+        #touch \$dep
+    else
         ## not sure how to resolve it, so treat it as a file
-        if \$( test ! -e "\$dep" ); then
+        if test \! -e "\$dep"; then
             fatal "file \$dep not found"
         fi
-
-        if \$( test "\$dep" -nt "$_rule_"  ); then
-            debug "\$dep newer than $_rule_"
-            count=\$( expr \$count + 1 )
-        else
-            debug "\$dep is ok"
-        fi
-    else
-        #echo [2] $_rule_: returned \$? -\> \$function
-        ## attempt resolving it w/ a generated build script
-        debug "resolving \$dep with \$dep.$BUILDSUFFIX"
-        . "$BUILDDIR/\$dep.$BUILDSUFFIX"
-        count=\$( expr \$count + \$? )
     fi
 done
 
-if \$( test \$count -gt 0 -o ! -e "$_rule_"); then
+## check if we've been updated
+count=0
+for dep in $_dependencies_; do
+    test "$_rule_" -ot "\$dep" && count=\$( expr \$count + 1 )
+    debug "status -> $_rule_ \$dep \$count"
+done
+
+test \$count -gt 0 && res1=1 || res1=0
+test \! -e "$_rule_" && res2=1 || res2=0
+debug "ruleexist: $_rule_ -> \$count (\$res1, \$res2)"
+
+if test \$res1 -gt 0 -o \$res2 -gt 0; then
     function=\$( hashGet "\$LIST" "$_rule_" )
     info "updating $_rule_ via $function"
 
-    \$function $_rule_ $_dependencies_
+    \$function "$_rule_" $_dependencies_
 
-    if \$( test \$? -ne 0 ); then
+    if test \$? -ne 0; then
         fatal "unable to update $_rule"
     fi
-    debug "successfully updated $_rule_"
+    debug "$_rule_: success"
 else
     info "$_rule_ is up to date"
 fi
 
-debug "$_rule_ returned \$count modified files"
+debug "$_rule_: reporting \$count modified files"
 return \$count
 EOF
 
@@ -173,7 +175,7 @@ resolve()
     # FIXME: i'm a dick for testing for '/'s via sed and a strcmp
     __directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
 
-    if $( test "$__directory" != "$rule" -a ! -d "$BUILDDIR/$__directory"); then
+    if test "$__directory" != "$rule" -a ! -d "$BUILDDIR/$__directory"; then
         __directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
         mkdir -p "$BUILDDIR/$__directory"
         info "creating workspace: $__directory"
@@ -258,7 +260,7 @@ while getopts AC:df:ij:qhx: opt; do
 done
 shift $( expr $OPTIND - 1 )
 
-if $(test $# -lt 1); then
+if test $# -lt 1; then
     __help $0
     exit 0
 fi
@@ -266,8 +268,8 @@ fi
 RULE="$1"
 shift
 
-if $( test -e "$BUILDDIR" ); then
-    if $( test ! -d "$BUILDDIR" ); then
+if test -e "$BUILDDIR"; then
+    if test ! -d "$BUILDDIR"; then
         fatal "$BUILDDIR is not a directory"
     fi
     debug "$BUILDDIR already exists"
@@ -279,7 +281,7 @@ fi
 debug "processing $FILE"
 . "$FILE" $@
 
-if $( test ! -f "$BUILDDIR/$RULE.$BUILDSUFFIX" ); then
+if test ! -f "$BUILDDIR/$RULE.$BUILDSUFFIX"; then
     fatal "unknown target: $RULE"
 fi
 
