@@ -1,4 +1,28 @@
 #!/bin/sh
+
+# Terminology:
+#   target -- the file that is supposed to be built
+#   rule -- the function that is used to produce the target
+#   deps -- any files that the rule uses to build a target
+
+# Commands:
+#   resolve $target $rule deps.. -- generates a tangible file $target
+#   define $target $rule args.. -- defines a target that will execute rule with the specified args
+#   pseudo $pseudo-target deps.. -- creates a pseudo-target that build each dep
+#   default $target -- starts building the specified target by default
+#   alias $original targets.. -- will point each target to the original target
+
+# deps can be prefixed with specific command characters.
+#   resolve prog1.dll sharedobject prog1.obj lib1.obj +kernel32.lib +user32.lib
+#   alias prog1.dll prog1.lib prog1.def prog1.manifest
+#
+#   resolve prog2.exe link prog2.obj prog1.lib +gdi32.lib
+#
+#   pseudo MakeConfig AskUserYN
+#   alias MakeConfig config.h localconfig.h
+#
+#   pseudo BuildEverything verify prog2.exe prog1.dll %MakeConfig
+
 debug()
 {
     if test $DEBUG -gt 0; then
@@ -27,9 +51,8 @@ fatal()
 hashGet()
 {
     hash=$1
-    shift
-    field=$1
-    shift
+    field=$2
+    shift 2
 
     if test "$field" == ""; then
         return 1
@@ -68,11 +91,9 @@ hashAdd()
 {
     local IFS="\n"
     argh=$1
-    shift
-    field=$1
-    shift
-    value=$1
-    shift
+    field=$2
+    value=$3
+    shift 3
 
     item="$field:$value"
 
@@ -88,9 +109,8 @@ __template()
 {
     _rule_=$1
     _directory_=$( echo "$_rule_" | sed 's/[^/\]\+$//' )
-    shift
-    _function_=$1
-    shift
+    _function_=$2
+    shift 2
     _dependencies_=$@
 
     ## template produces the following code
@@ -108,53 +128,51 @@ __template()
     # return count
 
     cat <<EOF
-## first do all building
+count=0
 for dep in $_dependencies_; do
-    function=\$( hashGet "\$LIST" "\$dep" )
-    res=\$?
 
-    debug "isaleaf -> $_rule_: \$dep \$res -> \$function"
-    if test \$res -eq 0; then
-        ## attempt resolving it w/ a generated build script
-        debug ">>>>>>>>>>>> \$dep"
-        . "$BUILDDIR/\$dep.$BUILDSUFFIX"
-        ## XXX: \$dep is killed at this point
-        debug "<<<<<<<<<<<< \$?"
-        #touch \$dep
-    else
+    #echo ----------------------------------------------------------------------
+    #echo [1] $_rule_: looking for \$dep
+    #echo "\$LIST"
+    function=\$( hashGet "\$LIST" "\$dep" )
+
+    if test \$? -gt 0; then
+        #echo [2] $_rule_: returned \$? -\> \$function
         ## not sure how to resolve it, so treat it as a file
-        if test \! -e "\$dep"; then
+        if test ! -e "\$dep"; then
             fatal "file \$dep not found"
         fi
+
+        if test "\$dep" -nt "$_rule_"; then
+            debug "\$dep newer than $_rule_"
+            count=\$( expr \$count + 1 )
+        else
+            debug "\$dep is ok"
+        fi
+    else
+        #echo [2] $_rule_: returned \$? -\> \$function
+        ## attempt resolving it w/ a generated build script
+        debug "resolving \$dep with \$dep.$BUILDSUFFIX"
+        . "$BUILDDIR/\$dep.$BUILDSUFFIX"
+        count=\$( expr \$count + \$? )
     fi
 done
 
-## check if we've been updated
-count=0
-for dep in $_dependencies_; do
-    test "$_rule_" -ot "\$dep" && count=\$( expr \$count + 1 )
-    debug "status -> $_rule_ \$dep \$count"
-done
-
-test \$count -gt 0 && res1=1 || res1=0
-test \! -e "$_rule_" && res2=1 || res2=0
-debug "ruleexist: $_rule_ -> \$count (\$res1, \$res2)"
-
-if test \$res1 -gt 0 -o \$res2 -gt 0; then
+if test \$count -gt 0 -o ! -e "$_rule_" -o "\$FORCE" -gt 0; then
     function=\$( hashGet "\$LIST" "$_rule_" )
     info "updating $_rule_ via $function"
 
-    \$function "$_rule_" $_dependencies_
+    \$function $_rule_ $_dependencies_
 
     if test \$? -ne 0; then
         fatal "unable to update $_rule"
     fi
-    debug "$_rule_: success"
+    debug "successfully updated $_rule_"
 else
     info "$_rule_ is up to date"
 fi
 
-debug "$_rule_: reporting \$count modified files"
+debug "$_rule_ returned \$count modified files"
 return \$count
 EOF
 
@@ -165,9 +183,8 @@ EOF
 resolve()
 {
     rule=$1
-    shift
-    function=$1
-    shift
+    function=$2
+    shift 2
 
     LIST=$( hashAdd "$LIST" "$rule" "$function" )
 
@@ -186,6 +203,46 @@ resolve()
     chmod +x "$BUILDDIR/$rule.$BUILDSUFFIX"
 }
 
+# builds the specified rule
+__define()
+{
+    _rule_=$1
+    _directory_=$( echo "$_rule_" | sed 's/[^/\]\+$//' )
+    _function_=$2
+    shift 2
+    _arguments_=$@
+
+    cat <<EOF
+info "executing $_rule_ via $_function_"
+$_function_ $_arguments_
+result=\$?
+debug "$_rule_ returned \$result"
+return \$result
+EOF
+}
+
+# executes a specified command with the given arguments
+define()
+{
+    rule=$1
+    function=$2
+    shift 2
+
+    LIST=$( hashAdd "$LIST" "$rule" "$function" )
+
+    __directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
+
+    if test "$__directory" != "$rule" -a ! -d "$BUILDDIR/$__directory"; then
+        __directory=$( echo "$rule" | sed 's/[^/\]\+$//' )
+        mkdir -p "$BUILDDIR/$__directory"
+        info "creating workspace: $__directory"
+    fi
+
+    out=$( __define "$rule" "$function" $@ )
+    echo "$out" >| "$BUILDDIR/$rule.$BUILDSUFFIX"
+    chmod +x "$BUILDDIR/$rule.$BUILDSUFFIX"
+}
+
 __help()
 {
     echo "Usage: $0 [options] target"
@@ -196,9 +253,11 @@ build target using the contents of "$FILE"
   -x dir        use dir ($BUILDDIR) for storing internal build scripts
   -C dir        change to directory
   -d            display debugging information
-  -f file       use specified build file
+  -F file       use specified build file
+  -f            force building the specified rule
   -j maxprocs   parallel building
   -q            question mode (1 on failure, 0 on success)
+  -R            rebuild workspace
 
 EOF
 }
@@ -215,12 +274,13 @@ DEBUG=0
 NOBITCH=0
 QUESTION=0
 JOBS=0
+FORCE=0
 FILE=./pbuild.list
 BUILDDIR="./.pbuild"
 ROOT=$(pwd)
 
 # parse opts
-while getopts AC:df:ij:qhx: opt; do
+while getopts AC:dF:ij:qhx:f opt; do
     case $opt in
         A)
             NOBITCH=1
@@ -243,7 +303,7 @@ while getopts AC:df:ij:qhx: opt; do
             chdir $OPTARG       #XXX: chdir needs to be platform independant
             ;;
 
-        f) 
+        F)
             FILE=$OPTARG
             ;;
 
@@ -254,6 +314,14 @@ while getopts AC:df:ij:qhx: opt; do
 
         h)
             __help $0
+            exit 0
+            ;;
+
+        f)
+            FORCE=1
+            ;;
+
+        *)
             exit 0
             ;;
     esac
@@ -285,8 +353,10 @@ if test ! -f "$BUILDDIR/$RULE.$BUILDSUFFIX"; then
     fatal "unknown target: $RULE"
 fi
 
+test "$FORCE" -gt 0 && info "user requested force build of $RULE"
+
 # XXX: should dump all targets here and rm them if they're files
 debug "building $RULE"
 . "$BUILDDIR/$RULE.$BUILDSUFFIX"
 
-info "successfully updated $RULE"
+info "successfully executed $RULE"
